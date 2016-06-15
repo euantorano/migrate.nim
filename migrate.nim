@@ -19,23 +19,26 @@ type
   Migrator* = ref MigratorObj
     ## A migrator is used to run migrations.
 
-proc getDriver(connectionString, migrationPath: string): Driver =
-    ## Get the database driver for the given connection string.
-    let url = parseUri(connectionString)
+proc getDriver(connectionSettings: ConnectionSettings, migrationPath: string): Driver =
+  ## Get the database driver for the given connection settings.
+  case connectionSettings.connectionType
+  of ConnectionType.mysql:
+    result = initMysqlDriver(connectionSettings, migrationPath)
+  of ConnectionType.postgres:
+    echo "Using Postgresql"
+    result = nil
+  of ConnectionType.sqlite:
+    echo "Using sqlite"
+    result = nil
+  of ConnectionType.unknown:
+    result = nil
 
-    case url.scheme
-    of "mysql":
-      result = initMysqlDriver(url, migrationPath)
-    of "postgres":
-      echo "Using Postgresql"
-      result = nil
-    of "sqlite3":
-      echo "Using sqlite"
-      result = nil
-    of "", nil:
-      result = nil
-    else:
-      raise newException(ValueError, "Unsupported connection scheme: " & url.scheme)
+proc getDriver(connectionString, migrationPath: string): Driver =
+  ## Get the database driver for the given connection string.
+  let url = parseUri(connectionString)
+  let connectionSettings = getConnectionSettings(url)
+
+  result = getDriver(connectionSettings, migrationPath)
 
 proc initMigrator*(migrationsPath = "./", connectionString: string = ""): Migrator =
   ## Initialize a new migrator, with the given migration path and connection string.
@@ -47,13 +50,20 @@ proc initMigrator*(migrationsPath = "./", connectionString: string = ""): Migrat
 
   result.driver = getDriver(connectionString, result.basePath)
 
-# TODO: Provide simple constructor with individual variables for connection settings.
+proc initMigrator*(migrationsPath = "./", connectionSettings: ConnectionSettings): Migrator =
+  ## Initialize a new migrator, with the given migration path and connection string.
+  new result
+  result.basePath = expandFilename(migrationsPath)
+
+  if not existsDir(result.basePath):
+    createDir(result.basePath)
+
+  result.driver = getDriver(connectionSettings, result.basePath)
 
 proc getPathForMigration(m: Migrator, name: string, direction: MigrationDirection): string =
   ## Get the path to a migration file in the given directory with the given direction.
   result = joinPath(m.basePath, name)
   result = changeFileExt(result, $direction & ".sql")
-  echo result
 
 proc createMigration*(m: Migrator, name: string): Migration =
   ## Create a new migration with the given name. The full path to the created
@@ -61,7 +71,6 @@ proc createMigration*(m: Migrator, name: string): Migration =
 
   let currentEpochTime = epochTime().int
   let fileName = $currentEpochTime & "_" & name
-  echo fileName
   result.up = m.getPathForMigration(fileName, MigrationDirection.up)
   result.down = m.getPathForMigration(fileName, MigrationDirection.down)
 
@@ -76,7 +85,6 @@ proc up*(m: Migrator): MigrationResult =
   if m.driver != nil:
     m.driver.ensureMigrationsTableExists()
     result = m.driver.runUpMigrations(m.basePath)
-
 
 when isMainModule:
   import docopt, logging, uri, os, strutils, private/driver_mysql
@@ -121,7 +129,8 @@ Options:
     let migrator = initMigrator(path, $args["<connection_string>"])
 
     if args["new"]:
-      discard migrator.createMigration($args["<name>"])
+      let created = migrator.createMigration($args["<name>"])
+      info("Ceated migration files: ", created.up, " and ", created.down)
     elif args["up"]:
       let migrationResults = migrator.up()
       info("Ran ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)

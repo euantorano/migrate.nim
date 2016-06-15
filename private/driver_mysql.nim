@@ -18,12 +18,12 @@ type
   MysqlDriver* = ref object of Driver
     handle: DbConn
 
-proc initMysqlDriver*(url: Uri, migrationPath: string): MysqlDriver =
+proc initMysqlDriver*(settings: ConnectionSettings, migrationPath: string): MysqlDriver =
   new result
-  result.connectionSettings = getConnectionSettings(url)
+  result.connectionSettings = settings
   result.migrationPath = migrationPath
-  result.handle = open(result.connectionSettings.server, result.connectionSettings.username,
-                       result.connectionSettings.password, result.connectionSettings.db)
+  result.handle = open(settings.server, settings.username,
+                       settings.password, settings.db)
 
 method ensureMigrationsTableExists*(d: MysqlDriver) =
   d.handle.exec(createMigrationsTableCommand)
@@ -32,7 +32,7 @@ method closeDriver*(d: MysqlDriver) =
   debug("Closing MySQL connection")
   d.handle.close()
 
-method runUpMigration(d: MysqlDriver, query, migration: string, batch: int): bool =
+proc runUpMigration(d: MysqlDriver, query, migration: string, batch: int): bool =
   result = false
   try:
     d.handle.exec(SqlQuery(query))
@@ -41,9 +41,9 @@ method runUpMigration(d: MysqlDriver, query, migration: string, batch: int): boo
   except DbError:
     error("Error running migration '", migration, "': ", getCurrentExceptionMsg())
 
-method runDownMigration(d: MysqlDriver, query: string) = discard
+proc runDownMigration(d: MysqlDriver, query: string) = discard
 
-method getLastBatchNumber(d: MysqlDriver): int =
+proc getLastBatchNumber(d: MysqlDriver): int =
   result = 0
   let value = d.handle.getValue(getNextBatchNumberCommand)
   if value == nil or value == "":
@@ -51,7 +51,7 @@ method getLastBatchNumber(d: MysqlDriver): int =
   else:
     result = parseInt(value)
 
-method getNextBatchNumber(d: MysqlDriver): int =
+proc getNextBatchNumber(d: MysqlDriver): int =
   let lastNumber = d.getLastBatchNumber()
   echo $lastNumber
   result = lastNumber + 1
@@ -61,7 +61,7 @@ iterator getRanMigrations(d: MysqlDriver): string =
   for row in d.handle.rows(getRanMigrationsCommand):
     yield row[0]
 
-method getUpMigrationsToRun(d: MysqlDriver, path: string): HashSet[string] =
+proc getUpMigrationsToRun(d: MysqlDriver, path: string): HashSet[string] =
   debug("Calculating up migrations to run against MySQL")
   result = getFilenamesToCheck(path, ".up.sql")
   var ranMigrations = initSet[string]()
