@@ -1,1 +1,7 @@
 nimcache/
+*.exe
+*.dll
+*.dylib
+nimsuggest.log
+*.sql
+migrate
