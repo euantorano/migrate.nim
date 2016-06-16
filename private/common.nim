@@ -8,6 +8,8 @@ from uri import Uri
 type
   MigrationResult* = tuple[numRan: int, batchNumber: int]
     ## The result of running a migration - how many changes were applied, and the batch number applied to the migration.
+  RanMigration* = tuple[filename: string, batch: int]
+    ## A migration that has been ran.
   ConnectionType* {.pure.} = enum
     ## The type of the database connection
     mysql = "mysql"

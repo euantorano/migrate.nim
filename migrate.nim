@@ -92,6 +92,12 @@ proc down*(m: Migrator): MigrationResult =
     m.driver.ensureMigrationsTableExists()
     result = m.driver.revertLastRanMigrations()
 
+proc clean*(m: Migrator): MigrationResult =
+  ## Revert all ran migrations.
+  if m.driver != nil:
+    m.driver.ensureMigrationsTableExists()
+    result = m.driver.revertAllMigrations()
+
 when isMainModule:
   import docopt, logging, uri, os, strutils, private/driver_mysql
 
@@ -102,6 +108,7 @@ Migrate.
 Usage:
   migrate new <name> [--path=<migrations_dir>]
   migrate (up|down) <connection_string> [--path=<migrations_dir>]
+  migrate clean <connection_string> [--path=<migrations_dir>]
   migrate (-h | --help)
   migrate --version
 
@@ -129,12 +136,15 @@ Options:
 
     if args["new"]:
       let created = migrator.createMigration($args["<name>"])
-      info("Ceated migration files: ", created.up, " and ", created.down)
+      info("Created migration files: ", created.up, " and ", created.down)
     elif args["up"]:
       let migrationResults = migrator.up()
       info("Ran ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
     elif args["down"]:
       let migrationResults = migrator.down()
       info("Reverted ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
+    elif args["clean"]:
+      let migrationResults = migrator.clean()
+      info("Reverted all ran migrations, ", $migrationResults.numRan, " migrations undone")
 
   main()

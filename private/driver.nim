@@ -21,3 +21,6 @@ method runUpMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbErro
 
 method revertLastRanMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
   ## Wind back the most recent batch of migrations.
+
+method revertAllMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+  ## Wind back all of the ran migrations.
