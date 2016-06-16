@@ -16,5 +16,8 @@ method ensureMigrationsTableExists*(d: Driver) {.raises: [Exception, DbError], t
 method closeDriver*(d: Driver) {.tags: [DbEffect, TimeEffect, WriteIOEffect, ReadIOEffect], base.} = discard
   ## Close the driver and the underlying database connection.
 
-method runUpMigrations*(d: Driver, path: string): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+method runUpMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
   ## Run all of the outstanding upwards migrations.
+
+method revertLastRanMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+  ## Wind back the most recent batch of migrations.

@@ -84,7 +84,13 @@ proc up*(m: Migrator): MigrationResult =
   ## Apply all pending database changes.
   if m.driver != nil:
     m.driver.ensureMigrationsTableExists()
-    result = m.driver.runUpMigrations(m.basePath)
+    result = m.driver.runUpMigrations()
+
+proc down*(m: Migrator): MigrationResult =
+  ## Revert the last set of ran migrations.
+  if m.driver != nil:
+    m.driver.ensureMigrationsTableExists()
+    result = m.driver.revertLastRanMigrations()
 
 when isMainModule:
   import docopt, logging, uri, os, strutils, private/driver_mysql
@@ -104,13 +110,6 @@ Options:
   --version     Show version.
 """
     version = "1.0.0"
-
-  proc migrateDown(connectionString, path: string) =
-    let driver = getDriver(connectionString, path)
-
-    if driver != nil:
-      defer: driver.closeDriver()
-      driver.ensureMigrationsTableExists()
 
   proc resolvePath(path: Value): string =
     if path.kind == vkNone:
@@ -135,6 +134,7 @@ Options:
       let migrationResults = migrator.up()
       info("Ran ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
     elif args["down"]:
-      migrateDown($args["<connection_string>"], path)
+      let migrationResults = migrator.down()
+      info("Reverted ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
 
   main()

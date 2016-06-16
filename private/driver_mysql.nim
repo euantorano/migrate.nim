@@ -4,7 +4,6 @@ import driver
 
 import db_mysql, uri, strutils, logging, sets, algorithm, os
 
-
 const
   createMigrationsTableCommand = sql"""CREATE TABLE IF NOT EXISTS migrations(
     filename VARCHAR(255) NOT NULL,
@@ -13,6 +12,8 @@ const
   getRanMigrationsCommand = sql"SELECT filename FROM migrations ORDER BY batch ASC, filename ASC;"
   getNextBatchNumberCommand = sql"SELECT MAX(batch) FROM migrations;"
   insertRanMigrationCommand = sql"INSERT INTO migrations(filename, batch) VALUES (?, ?);"
+  removeRanMigrationCommand = sql"DELETE FROM migrations WHERE filename = ? AND batch = ?;"
+  getRanMigrationsForBatchCommand = sql"SELECT filename FROM migrations WHERE batch = ? ORDER BY filename ASC;"
 
 type
   MysqlDriver* = ref object of Driver
@@ -22,17 +23,19 @@ proc initMysqlDriver*(settings: ConnectionSettings, migrationPath: string): Mysq
   new result
   result.connectionSettings = settings
   result.migrationPath = migrationPath
-  result.handle = open(settings.server, settings.username,
-                       settings.password, settings.db)
+  result.handle = open(settings.server, settings.username, settings.password, settings.db)
 
 method ensureMigrationsTableExists*(d: MysqlDriver) =
+  ## Make sure that the `migrations` table exists in the database.
   d.handle.exec(createMigrationsTableCommand)
 
 method closeDriver*(d: MysqlDriver) =
+  ## Close the driver and the underlying database connection.
   debug("Closing MySQL connection")
   d.handle.close()
 
 proc runUpMigration(d: MysqlDriver, query, migration: string, batch: int): bool =
+  ## Run and record an upwards migration.
   result = false
   try:
     d.handle.exec(SqlQuery(query))
@@ -41,9 +44,18 @@ proc runUpMigration(d: MysqlDriver, query, migration: string, batch: int): bool 
   except DbError:
     error("Error running migration '", migration, "': ", getCurrentExceptionMsg())
 
-proc runDownMigration(d: MysqlDriver, query: string) = discard
+proc runDownMigration(d: MysqlDriver, query, migration: string, batch: int): bool =
+  ## Run and remove a downwards migration.
+  result = false
+  try:
+    d.handle.exec(SqlQuery(query))
+    d.handle.exec(removeRanMigrationCommand, migration, batch)
+    result = true
+  except DbError:
+    error("Error reversing migration '", migration, "': ", getCurrentExceptionMsg())
 
 proc getLastBatchNumber(d: MysqlDriver): int =
+  ## Get the last used batch number from the `migrations` table.
   result = 0
   let value = d.handle.getValue(getNextBatchNumberCommand)
   if value == nil or value == "":
@@ -52,8 +64,8 @@ proc getLastBatchNumber(d: MysqlDriver): int =
     result = parseInt(value)
 
 proc getNextBatchNumber(d: MysqlDriver): int =
+  ## Get the next batch number.
   let lastNumber = d.getLastBatchNumber()
-  echo $lastNumber
   result = lastNumber + 1
 
 iterator getRanMigrations(d: MysqlDriver): string =
@@ -62,7 +74,8 @@ iterator getRanMigrations(d: MysqlDriver): string =
     yield row[0]
 
 proc getUpMigrationsToRun(d: MysqlDriver, path: string): HashSet[string] =
-  debug("Calculating up migrations to run against MySQL")
+  ## Get a set of pending upwards migrations from the given path.
+  debug("Calculating up migrations to run")
   result = getFilenamesToCheck(path, ".up.sql")
   var ranMigrations = initSet[string]()
 
@@ -75,13 +88,39 @@ proc getUpMigrationsToRun(d: MysqlDriver, path: string): HashSet[string] =
 
   debug("Got ", len(result), " files to run: ", $result)
 
-method runUpMigrations*(d: MysqlDriver, path: string): MigrationResult =
+method runUpMigrations*(d: MysqlDriver): MigrationResult =
+  ## Run all of the outstanding upwards migrations.
   result = (numRan: 0, batchNumber: d.getnextBatchNumber())
 
   var fileContent: TaintedString
-  for file in d.getUpMigrationsToRun(path):
+  for file in d.getUpMigrationsToRun(d.migrationPath):
     debug("Running migration: ", file)
     fileContent = readFile(d.migrationPath / file)
     if fileContent != nil and len(fileContent) > 0:
       if d.runUpMigration(fileContent, file, result.batchNumber):
-        result.numRan = result.numRan + 1
+        inc result.numRan
+
+iterator getMigrationsForBatch(d: MysqlDriver, batch: int): string =
+  ## Get all of the migrations that have been ran for a given batch.
+  for row in d.handle.rows(getRanMigrationsForBatchCommand, batch):
+    yield row[0]
+
+method revertLastRanMigrations*(d: MysqlDriver): MigrationResult =
+  ## Wind back the most recent batch of migrations.
+  result = (numRan: 0, batchNumber: d.getLastBatchNumber())
+
+  debug("Calculating down migrations to run for batch number ", result.batchNumber)
+
+  var downFileName: string
+  var downFilePath: string
+  var fileContent: TaintedString
+  for file in d.getMigrationsForBatch(result.batchNumber):
+    if file.endsWith(".up.sql"):
+      debug("Found migration to revert: ", file)
+      downFileName = file[0..^8] & ".down.sql"
+      downFilePath = d.migrationPath / downFileName
+      if existsFile(downFilePath):
+        debug("Running down migration: ", downFilePath)
+        fileContent = readFile(downFilePath)
+        if d.runDownMigration(fileContent, file, result.batchNumber):
+          inc result.numRan
