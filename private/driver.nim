@@ -24,3 +24,12 @@ method revertLastRanMigrations*(d: Driver): MigrationResult {.raises: [Exception
 
 method revertAllMigrations*(d: Driver): MigrationResult {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
   ## Wind back all of the ran migrations.
+
+method getAllTablesForDatabase*(d: Driver, database: string): (iterator: string) {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+  ## Get the names of all of the tables within the given database.
+
+method getCreateForTable*(d: Driver, table: string): string {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+  ## Get the create syntax for the given table.
+
+method getDropForTable*(d: Driver, table: string): string {.raises: [Exception, DbError], tags: [WriteDbEffect, ReadDbEffect, TimeEffect, WriteIOEffect, ReadIOEffect, RootEffect], base.} = discard
+  ## Get the drop syntax for the given table.

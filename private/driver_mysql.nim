@@ -2,11 +2,12 @@
 
 import driver
 
-from db_mysql import open, sql, DbConn, exec, close, SqlQuery, getValue, rows, DbError
+import db_mysql
 from strutils import endsWith, parseInt
 from logging import debug, error
 from sets import incl, excl, HashSet, initSet, len, items, `$`
 from os import existsFile, `/`
+from nre import re, replace
 
 const
   createMigrationsTableCommand = sql"""CREATE TABLE IF NOT EXISTS migrations(
@@ -18,6 +19,11 @@ const
   insertRanMigrationCommand = sql"INSERT INTO migrations(filename, batch) VALUES (?, ?);"
   removeRanMigrationCommand = sql"DELETE FROM migrations WHERE filename = ? AND batch = ?;"
   getRanMigrationsForBatchCommand = sql"SELECT filename FROM migrations WHERE batch = ? ORDER BY filename ASC;"
+  getTablesForDatabaseCommand = sql"SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = ?;"
+  getCreateForTableCommand = "SHOW CREATE TABLE `"
+
+let
+  autoIncrementRegex = re" AUTO_INCREMENT=\d+"
 
 type
   MysqlDriver* = ref object of Driver
@@ -150,3 +156,19 @@ method revertAllMigrations*(d: MysqlDriver): MigrationResult =
         fileContent = readFile(downFilePath)
         if d.runDownMigration(fileContent, file, batchNumber):
           inc result.numRan
+
+method getAllTablesForDatabase*(d: MysqlDriver, database: string): (iterator: string) =
+  ## Get the names of all of the tables within the given database.
+  return iterator: string =
+    for row in d.handle.rows(getTablesForDatabaseCommand, database):
+      if row[0] != "migrations":
+        yield row[0]
+
+method getCreateForTable*(d: MysqlDriver, table: string): string =
+  ## Get the create syntax for the given table.
+  let row = d.handle.getRow(SqlQuery(getCreateForTableCommand & table & "`"), table)
+  result = row[1].replace(autoIncrementRegex, "")
+
+method getDropForTable*(d: MysqlDriver, table: string): string =
+  ## Get the drop syntax for the given table.
+  result = "DROP TABLE IF EXISTS `" & table & "`;"

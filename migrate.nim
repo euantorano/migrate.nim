@@ -7,6 +7,7 @@ from private/driver_mysql import initMysqlDriver
 from os import expandFilename, existsDir, createDir, joinPath, changeFileExt
 from uri import parseUri, Uri
 from times import epochTime
+from logging import debug
 
 type
   MigrationDirection {.pure.} = enum
@@ -66,7 +67,7 @@ proc getPathForMigration(m: Migrator, name: string, direction: MigrationDirectio
   result = changeFileExt(result, $direction & ".sql")
 
 proc createMigration*(m: Migrator, name: string): Migration =
-  ## Create a new migration with the given name. The full path to the created
+  ## Create a new migration with the given name. The full path to the created.
   result = (up: "", down: "")
 
   let currentEpochTime = epochTime().int
@@ -98,8 +99,36 @@ proc clean*(m: Migrator): MigrationResult =
     m.driver.ensureMigrationsTableExists()
     result = m.driver.revertAllMigrations()
 
+proc generate*(m: Migrator, db: string): int =
+  ## Generate migrations to create all of the tables in the given database.
+  result = 0
+
+  if m.driver != nil:
+    let tables = m.driver.getAllTablesForDatabase(db)
+
+    var createTableCode: string
+    var dropTableCode: string
+    for table in tables():
+      debug("Creating migration for table '", table, "'")
+      createTableCode = m.driver.getCreateForTable(table)
+      dropTableCode = m.driver.getDropForTable(table)
+      let createdMigration = m.createMigration("create_" & db & "_" & table & "_table")
+
+      let upFile = open(createdMigration.up, fmReadWrite)
+      defer: close(upFile)
+      upFile.write(createTableCode)
+
+      let downFile = open(createdMigration.down, fmReadWrite)
+      defer: close(upFile)
+      downFile.write(dropTableCode)
+
+      inc result
+
 when isMainModule:
-  import docopt, logging, uri, os, strutils, private/driver_mysql
+  import docopt
+  from logging import newCOnsoleLogger, addHandler, info, error
+  from os import getCurrentDir
+  from db_common import DbError
 
   const
     doc = """
@@ -109,10 +138,13 @@ Usage:
   migrate new <name> [--path=<migrations_dir>]
   migrate (up|down) <connection_string> [--path=<migrations_dir>]
   migrate clean <connection_string> [--path=<migrations_dir>]
+  migrate generate <connection_string> [--database=<db>] [--path=<migrations_dir>]
   migrate (-h | --help)
   migrate --version
 
 Options:
+  --path=<migrations_dir> The path to use to store migrations [default: ./].
+  --database=<db> The database to generate migrations for.
   -h --help     Show this screen.
   --version     Show version.
 """
@@ -124,6 +156,11 @@ Options:
     else:
       result = $path
 
+  proc resolveDb(db: Value): string =
+    result = $db
+    if db.kind == vkNone or len(result) == 0:
+      raise newException(ValueError, "Database is required")
+
   proc main() =
     let args = docopt(doc, version = version)
 
@@ -132,19 +169,28 @@ Options:
 
     let path = resolvePath(args["--path"])
 
-    let migrator = initMigrator(path, $args["<connection_string>"])
+    try:
+      let migrator = initMigrator(path, $args["<connection_string>"])
 
-    if args["new"]:
-      let created = migrator.createMigration($args["<name>"])
-      info("Created migration files: ", created.up, " and ", created.down)
-    elif args["up"]:
-      let migrationResults = migrator.up()
-      info("Ran ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
-    elif args["down"]:
-      let migrationResults = migrator.down()
-      info("Reverted ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
-    elif args["clean"]:
-      let migrationResults = migrator.clean()
-      info("Reverted all ran migrations, ", $migrationResults.numRan, " migrations undone")
+      if args["new"]:
+        let created = migrator.createMigration($args["<name>"])
+        info("Created migration files: ", created.up, " and ", created.down)
+      elif args["up"]:
+        let migrationResults = migrator.up()
+        info("Ran ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
+      elif args["down"]:
+        let migrationResults = migrator.down()
+        info("Reverted ", $migrationResults.numRan, " migrations, with batch number: ", $migrationResults.batchNumber)
+      elif args["clean"]:
+        let migrationResults = migrator.clean()
+        info("Reverted all ran migrations, ", $migrationResults.numRan, " migrations undone")
+      elif args["generate"]:
+        let db = resolveDb(args["--database"])
+        let numMigrationsCreated = migrator.generate(db)
+        info("Created ", numMigrationsCreated, " migrations for database '", db, "'")
+    except DbError:
+      error("Error running SQL query: ", getCurrentExceptionMsg())
+    except:
+      error("Unexpected error: ", getCurrentExceptionMsg())
 
   main()

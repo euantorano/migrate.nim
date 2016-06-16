@@ -120,5 +120,5 @@ let cleanResult = migrator.clean()
 
 - [x] Create migrations, run them, revert them and clean them
 - [x] MySQL driver to work with MySQL databases
-- [ ] Generator to generate migration files from existing databases
+- [x] Generator to generate migration files from existing databases
 - [ ] Drivers for other database engines, including SQLite and PostgreSQL
