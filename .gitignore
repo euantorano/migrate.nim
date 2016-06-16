@@ -5,3 +5,4 @@ nimcache/
 nimsuggest.log
 *.sql
 migrate
+release/
